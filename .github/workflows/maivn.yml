@@ -1,0 +1,74 @@
+name: Build Linux Kernel (fix2)
+
+on:
+  workflow_dispatch: # Allows manual trigger from the GitHub Actions tab
+  schedule:
+    - cron: '0 0 * * 1' # Automatically builds every Monday at midnight to test mainline
+
+jobs:
+  build-kernel:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout Kernel Source
+        uses: actions/checkout@v4
+        with:
+          repository: 'torvalds/linux'
+          ref: 'master' # Changes to a specific tag (e.g., 'v6.12') if desired
+
+      - name: Install Build Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            libncurses-dev \
+            bison \
+            flex \
+            libssl-dev \
+            libelf-dev \
+            bc \
+            git \
+            cpio \
+            rsync \
+            kmod
+
+      - name: Configure Kernel
+        run: |
+          # Generate the default configuration for x86_64
+          make defconfig
+          
+          # Optional: Turn off debug info to drastically speed up compilation and shrink binary sizes
+          scripts/config --disable CONFIG_DEBUG_INFO
+          scripts/config --disable CONFIG_DEBUG_INFO_BTF
+          scripts/config --disable CONFIG_DEBUG_INFO_DWARF_TOOLCHAIN_DEFAULT
+          
+          # Process and validate the configuration changes
+          make olddefconfig
+
+      - name: Compile Kernel and Modules
+        run: |
+          # Determine the maximum available CPU threads to build fast
+          THREADS=$(nproc)
+          echo "Building with $THREADS threads..."
+          
+          # Compile the main kernel image (bzImage) and all standard driver modules
+          make -j$THREADS bzImage
+          make -j$THREADS modules
+
+      - name: Package Build Artifacts
+        run: |
+          mkdir -p output
+          # Copy the compiled bootable kernel binary
+          cp arch/x86/boot/bzImage output/vmlinuz-custom
+          # Copy the system map file for debugging/logging symbols
+          cp System.map output/System.map-custom
+          # Copy the final configuration file used
+          cp .config output/config-custom
+
+      - name: Upload Compiled Kernel Artifacts
+        uses: zqqle03-jpg/kernelcompiler67
+        with:
+          name: compiled-linux-kernel
+          path: output/
+          retention-days: 7
+          
